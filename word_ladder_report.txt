@@ -1,0 +1,584 @@
+================================================================================
+                      WORD LADDER STRATEGY ANALYSIS
+                               Full Report
+================================================================================
+
+CONTENTS
+  1. Summary
+  2. Goals and approach
+  3. Data and methods
+  4. Hypothesis 1: common letters are the bridge letters
+  5. Hypothesis 2: more letters in common, shorter ladder
+  6. Hypothesis 3: similar vowel/consonant patterns, shorter ladder
+  7. Anatomy of shortest ladders
+  8. Computer solvers
+  9. Human-like solver
+ 10. How to solve a word ladder
+ 11. Limitations and next steps
+ 12. Appendix: files and commands
+
+
+--------------------------------------------------------------------------------
+1. SUMMARY
+--------------------------------------------------------------------------------
+
+The most useful habit for a person solving a word ladder is to watch the
+consonant/vowel pattern. Pairs whose patterns differ need far longer detours,
+and a simulated solver that fixes the vowel pattern first solves more puzzles
+with fewer wasted steps. Working from both ends at once is the second most
+useful habit; it is the biggest single boost to finishing a puzzle.
+
+The study tested three hypotheses on 1,095,747 noun pairs of 3, 4 and 5
+letters, then compared computer search algorithms and a simulated human
+solver.
+
+  Hypothesis                          Verdict        Key evidence
+  ----------------------------------  -------------  ---------------------------
+  1. Bridge letters will be the       Partly true    Raw top seven: a, e, s, t,
+     common ones (r, s, t, l, n, e)                  l, r, n. Relative to how
+                                                     common each letter is,
+                                                     b, d, s, f, c, t are
+                                                     over-used and vowels
+                                                     (especially e) under-used.
+
+  2. More letters in common means     True, but      Each differing letter needs
+     a shorter ladder                 partly by      at least one step. The
+                                      definition     extra detour also shrinks:
+                                                     4-letter pairs average 2.3
+                                                     extra steps with 0 matches
+                                                     vs 1.0 with 2. Letters
+                                                     shared in DIFFERENT
+                                                     positions make ladders
+                                                     longer.
+
+  3. Similar vowel/consonant          Strongly true  With length and differing
+     patterns mean shorter ladders                   letters held fixed, 4-letter
+                                                     pairs average 1.6 extra
+                                                     steps with matching
+                                                     patterns vs 5.7 with every
+                                                     position mismatched.
+
+For computers, plain breadth-first search is the best tool: always shortest,
+and the fastest in practice on graphs this small. Guided searches do less work
+but often miss the shortest ladder. A* always finds it with 3-4x less searching
+than plain breadth-first search, but is no faster in wall-clock time.
+
+For people, simple rules matter enormously. A simulated solver choosing at
+random solves 6% of puzzles; one that always moves toward the target solves
+73%; adding vowel-pattern and both-ends rules raises this to 78% overall, and
+to 99-100% for 3- and 4-letter puzzles.
+
+
+--------------------------------------------------------------------------------
+2. GOALS AND APPROACH
+--------------------------------------------------------------------------------
+
+The goal is practical: find patterns a person can use to solve word ladders,
+without running a full search in their head.
+
+Questions asked:
+
+  - Which letters get used as temporary "bridge" letters, when they appear in
+    neither the start nor the end word?
+  - Does sharing more letters make a ladder shorter?
+  - Do matching consonant/vowel patterns (for example CCVCV and CCVCV) make a
+    ladder shorter, beyond the letters shared?
+  - What are the most common changes in a shortest ladder? Is it best to match
+    vowels early, match the first and last letters early, or use common
+    letters?
+
+The work ran in five stages:
+
+  1. Build the puzzle set. A list of common singular nouns of 3, 4 and 5
+     letters, so every puzzle uses familiar words.
+  2. Solve every pair exactly. A C++ program found every shortest ladder for
+     every same-length pair.
+  3. Describe shortest ladders. A Python analysis tested the hypotheses and
+     labelled every move.
+  4. Benchmark computer strategies. Rules suggested by stage 3 were turned
+     into search strategies, timed, and checked for whether the first ladder
+     found was a shortest one.
+  5. Simulate a human solver. A model of a person with one-step lookahead,
+     limited memory and limited patience tested the same rules as practical
+     habits.
+
+
+--------------------------------------------------------------------------------
+3. DATA AND METHODS
+--------------------------------------------------------------------------------
+
+All results use 2,382 common singular nouns as puzzle words and 5,178 common
+words as allowed in-between steps.
+
+Word lists
+
+  Common words (5,178): words of 3-5 letters from the ENABLE Scrabble
+  dictionary (no proper nouns or abbreviations), kept if their frequency in
+  everyday English is at least about one per million words (wordfreq Zipf
+  score >= 3.0), with profanity and slurs removed.
+
+  Puzzle nouns (2,382): the common words used mainly as nouns, plus words with
+  a frequent noun sense (such as "walk" and "play"), judged with WordNet.
+  Plurals and -ing verb forms were removed, and each length was trimmed to an
+  even count: 354 three-letter, 936 four-letter and 1,092 five-letter nouns.
+
+Pairs and ladders
+
+  Every unordered pair of same-length nouns was solved. A breadth-first search
+  recorded every shortest ladder for each pair, up to 1,000 per pair (one pair
+  exceeded this).
+
+  Length      Pairs     No ladder   Mean steps   Mean detour   Need a detour
+  ---------   -------   ---------   ----------   -----------   -------------
+  3 letters    62,481      5.0%        3.67         0.93           52.1%
+  4 letters   437,580     14.6%        5.69         2.07           85.0%
+  5 letters   595,686     76.3%       13.18         8.71           97.2%
+
+Definitions
+
+  Steps                Letter changes in a shortest ladder.
+  Differing positions  Positions where the start and end letters differ. A
+                       ladder needs at least this many steps.
+  Detour               Steps minus differing positions: the extra steps forced
+                       by missing words.
+  Bridge letter        A letter that appears in an in-between word but in
+                       neither the start nor the end word.
+  Vowels               a, e, i, o, u, and y when it is not the first letter
+                       and is not followed by a vowel ("sky" and "gym" count;
+                       "yarn" does not).
+
+Weighting
+
+  Each pair counts equally: a pair with 9 shortest ladders gives each ladder
+  weight 1/9. Results are direction-free, since any ladder also works in
+  reverse.
+
+
+--------------------------------------------------------------------------------
+4. HYPOTHESIS 1: COMMON LETTERS ARE THE BRIDGE LETTERS
+--------------------------------------------------------------------------------
+
+Verdict: PARTLY TRUE. The raw ranking matches the prediction, but mostly
+because those letters are common everywhere. Measured against how often each
+letter appears in the dictionary, the over-used bridges are consonants and the
+under-used ones are vowels.
+
+Raw ranking. By the share of ladders that use a letter as a bridge (all
+lengths pooled), the top seven are:
+
+  a 33%   e 29%   s 28%   t 28%   l 24%   r 20%   n 20%
+
+That is almost exactly the predicted r, s, t, l, n, e, plus a.
+
+Fairer test. Each letter's share of all bridge-letter appearances, divided by
+its share of letters in the dictionary. A ratio above 1.0 means the letter is
+used as a bridge more than its commonness predicts.
+
+  Letter  Ratio   Letter  Ratio   Letter  Ratio   Letter  Ratio
+  ------  -----   ------  -----   ------  -----   ------  -----
+  b       1.89    m       1.20    i  (V)  0.83    e  (V)  0.46
+  d       1.57    n       1.08    g       0.59    v       0.44
+  s       1.53    l       1.04    o  (V)  0.58    j       0.33
+  f       1.45    r       1.00    z       0.51    x       0.16
+  c       1.42    w       0.89    u  (V)  0.50    q       0.00
+  t       1.33    y       0.84
+  p       1.27    a  (V)  0.83
+  k       1.24
+  h       1.22                                       (V) = vowel
+
+  - Over-used: b, d, s, f, c, t (1.3-1.9x). These are consonants that start or
+    end many short words, so swapping one in opens new routes.
+  - Under-used: e (0.46x), u, v, g, o (about 0.5-0.6x), a and i (0.8x).
+    Vowels change often, but usually to the vowel the end word needs, not to
+    a temporary one.
+  - Almost never used: j (0.3x), x (0.16x), q (never).
+
+One quirk of the word lists inflates s. The puzzle words contain no plurals,
+but the in-between words do, so plural forms such as "cats" often serve as
+stepping stones. The letter e is the opposite case: it is so often in the
+start or end word that it rarely counts as a bridge.
+
+
+--------------------------------------------------------------------------------
+5. HYPOTHESIS 2: MORE LETTERS IN COMMON, SHORTER LADDER
+--------------------------------------------------------------------------------
+
+Verdict: TRUE for letters in the same position; each extra match shortens the
+ladder, both directly and by reducing detours. FALSE for letters shared in
+different positions, which make ladders longer.
+
+Part of this is guaranteed. If two words differ in 3 positions, the ladder
+needs at least 3 steps, so more matches always lowers the minimum. The
+informative measure is the detour: the extra steps beyond that minimum. The
+detour also falls as matches rise, at every length.
+
+  Mean detour (extra steps) by letters already in the same position
+
+  Matching positions     0       1       2       3       4
+  ------------------   -----   -----   -----   -----   -----
+  3 letters             1.08    0.51    0.00     -       -
+  4 letters             2.30    1.69    1.00    0.00     -
+  5 letters             9.43    8.49    6.10    3.36    0.00
+
+  Share of pairs needing any detour
+
+  Matching positions     0       1       2       3       4
+  ------------------   -----   -----   -----   -----   -----
+  3 letters              59%     34%      0%     -       -
+  4 letters              91%     78%     51%      0%     -
+  5 letters             100%     98%     90%     64%      0%
+
+Words one letter apart never need a detour, since they are already neighbors.
+
+Letters shared in the wrong position hurt. Holding length and differing
+positions fixed, each letter shared in a different position adds detour:
+
+  4-letter pairs, all 4 positions differ    Mean detour   Need a detour
+  ---------------------------------------   -----------   -------------
+  No letters shared anywhere                    2.13           88%
+  1 letter shared, different position           2.48           93%
+  2 letters shared, different positions         2.66           96%
+  3 letters shared, different positions         2.86           97%
+
+Anagram-like pairs are harder, not easier. A likely reason: a letter that sits
+in the wrong position must be moved, and a ladder cannot move a letter, only
+replace it. Shared letters in the wrong place also tend to mean mismatched
+vowel patterns (Hypothesis 3).
+
+
+--------------------------------------------------------------------------------
+6. HYPOTHESIS 3: SIMILAR VOWEL/CONSONANT PATTERNS, SHORTER LADDER
+--------------------------------------------------------------------------------
+
+Verdict: STRONGLY TRUE, and the clearest result of the study. With word length
+and differing positions held fixed, every position where the consonant/vowel
+pattern differs adds detour, and the cost grows steeply after the first
+mismatch.
+
+The test compares pairs that differ in the same number of positions, so shared
+letters cannot explain the effect. The outcome is the detour.
+
+  Mean detour by number of consonant/vowel pattern mismatches
+
+  Pairs                    0       1       2       3       4       5
+  --------------------   -----   -----   -----   -----   -----   -----
+  3 letters, 2 differ     0.29    0.51    2.41     -       -       -
+  3 letters, 3 differ     0.38    0.63    2.19    2.50     -       -
+  4 letters, 2 differ     0.80    1.16    3.05     -       -       -
+  4 letters, 3 differ     1.25    1.47    2.88    4.35     -       -
+  4 letters, 4 differ     1.60    1.65    2.72    3.85    5.74     -
+  5 letters, 4 differ     5.33    7.16   10.29   11.35   12.94     -
+  5 letters, 5 differ     5.55    7.22    8.78   10.65   12.01   12.64
+
+One mismatch costs little; two or more cost a lot. A single mismatch is often
+fixable in one move (for example a vowel becoming a consonant in place). Two
+mismatches often mean a vowel has to shift position, and a ladder can only do
+that by passing through words that fit both shapes.
+
+This also explains part of Hypothesis 2: letters shared in the wrong positions
+usually come with mismatched patterns.
+
+
+--------------------------------------------------------------------------------
+7. ANATOMY OF SHORTEST LADDERS
+--------------------------------------------------------------------------------
+
+Shortest ladders share a recognizable shape: matching vowels stay put, the
+outer consonants do the temporary work, and the structural vowel/consonant
+changes happen in the middle of the ladder.
+
+Every move in every shortest ladder was labelled as DIRECT (start letter
+straight to end letter) or DETOUR (any move involving a temporary letter).
+
+7.1 Matching vowels are almost never broken
+
+  Position that already matches     3 letters    4 letters
+  -------------------------------   ---------    ---------
+  2nd letter, vowel                    0.1%         3.9%
+  1st letter, consonant                0.9%        22.9%
+  Last letter, consonant               8.5%        17.4%
+
+  (Share of ladders that temporarily change that letter.)
+
+7.2 The outer letters are the workhorses
+
+  In 4-letter ladders, the first and last positions each take about 18-20% of
+  all detour moves, versus about 13% for each middle position. In 5-letter
+  ladders the first letter alone takes 22%.
+
+7.3 Ladders have a shape in time
+
+  Detour moves cluster near the two ends of a ladder: step away from the start
+  word early, step back toward the end word late. Vowel-to-consonant changes
+  cluster in the middle. A direction-free "centrality" score (0 = first or last
+  move, 1 = exact middle) averages 0.47 for vowel/consonant changes in 4-letter
+  ladders, versus 0.36 for consonant-to-consonant swaps and for detour moves.
+
+7.4 The most common swaps are vowel for vowel
+
+  a<->o, a<->e, a<->i and e<->o lead at every length, each 2-4% of all moves.
+  Next come vowel<->consonant swaps such as e<->l and e<->t, then consonant
+  swaps: d<->t in 4-letter ladders, and l<->r, p<->s and r<->s in 5-letter
+  ladders.
+
+7.5 Some letters make words nearly unreachable
+
+  In 4-letter pairs, 59% of pairs with an x have no ladder at all, and 34%
+  with a j, versus about 11% for pairs with p, t or b. At 5 letters, pairs
+  with a q are unreachable 96% of the time.
+
+7.6 Answers to the original strategy questions
+
+  - Match vowels early? Get the vowel PATTERN right, then protect matching
+    vowels.
+  - Match the first/last letters early? No. They are the letters detours
+    borrow.
+  - Use common letters? Yes, but common CONSONANTS as temporary letters, not
+    vowels.
+
+
+--------------------------------------------------------------------------------
+8. COMPUTER SOLVERS
+--------------------------------------------------------------------------------
+
+Plain breadth-first search (BFS) is the best computer method for these
+puzzles: always shortest, and the fastest in wall-clock time. Strategy rules
+make guided searches do much less work, but they often miss the shortest
+ladder.
+
+8.1 Algorithms tested
+
+  First-hit search   Expands words one at a time, skips any word already seen,
+                     and stops the moment it reaches the end word. With no
+                     strategy this is plain BFS, which is guaranteed to find a
+                     shortest ladder. With a strategy it becomes best-first:
+                     it expands whichever word the strategy scores best.
+
+  Branch and bound   A depth-first search that records its first complete
+                     ladder, then keeps looking and cuts any branch that cannot
+                     beat the best so far. It always ends with a shortest
+                     ladder.
+
+  A*                 Expands words in order of steps taken plus letters still
+                     wrong. Because that estimate never overstates the steps
+                     left, the first ladder it finds is always shortest.
+                     Strategies only break ties.
+
+8.2 Strategies (each a score built from the ladder analysis)
+
+  G  fewer letters wrong            P  protect matching vowels
+  V  vowel pattern                  O  temporary letters in outer positions
+  E  ends first                     L  common temporary letters
+
+8.3 First-hit search, 300 pairs per length
+
+  Strategy           First ladder is shortest     Words expanded   Time
+                     (3 / 4 / 5 letters)          (all lengths)    (all)
+  ----------------   --------------------------   --------------   ------
+  none (plain BFS)   100 / 100 / 100%                  454          21 us
+  G                   89 /  61 /  34%                   70          16 us
+  GV                  79 /  47 /  27%                   56          15 us
+  O                   91 /  66 /  39%                  150          28 us
+  E                   77 /  45 /  46%                  155          27 us
+  P                  100 /  99 /  93%                  425          60 us
+  V                   57 /  30 /  24%                   84          24 us
+
+  - Greedy progress (G) is the best single rule: 6x less work than BFS, but
+    accuracy falls steeply with word length, because long ladders need detours
+    and greedy search avoids them.
+  - Less work did not mean much faster. A guided search keeps a sorted priority
+    queue, which costs more per word than BFS's simple queue; at 5 letters G is
+    slower than BFS (35 vs 31 us).
+  - Ends-first (E) is the most accurate guided rule at 5 letters (46%),
+    probably because it is less greedy about the middle letters.
+  - Vowels-first (V) alone is the least accurate; it ignores consonants.
+  - P behaves almost like plain BFS, because most words tie on it.
+
+8.4 Branch and bound
+
+  Every final ladder was shortest, with no search hitting the expansion cap.
+
+  Strategy   First ladder is shortest   Time per puzzle (3 / 4 / 5 letters)
+  --------   ------------------------   -----------------------------------
+  none                 1%                 1.3 ms /  8.3 ms / 13.7 ms
+  G                   31%                 1.3 ms /  2.5 ms / 22.1 ms
+  GV                  33%                 0.8 ms /  0.9 ms / 21.8 ms
+  GVP                 33%                 0.8 ms /  0.9 ms / 21.8 ms
+
+  - GV and GVP (identical) were the best combinations: about 9x faster than
+    plain branch and bound at 4 letters.
+  - At 5 letters plain branch and bound was fastest, because re-sorting
+    neighbors costs more than it saves when the graph is this thin.
+  - The plain version's first ladders are enormous (about 400 extra steps on
+    average), because depth-first search wanders before it improves.
+  - Even at its best, branch and bound was at least 35x slower than BFS, and
+    usually hundreds of times slower.
+
+8.5 A* (separate 300-pair test run)
+
+  Length   BFS words   A* words   BFS time   A* time
+  ------   ---------   --------   --------   -------
+  3            137         39       9 us      10 us
+  4            525        115      22 us      21 us
+  5            756        462      26 us      62 us
+
+  A* found a shortest ladder in all 11,700 test searches. It searched 3-4x
+  fewer words at 3 and 4 letters but was no faster, and twice as slow at 5
+  letters, where "letters still wrong" underestimates the long detours.
+
+8.6 What carried over
+
+  Rules built from the description of shortest ladders do not make good
+  shortcuts on their own; they help only when combined with plain progress (G).
+
+
+--------------------------------------------------------------------------------
+9. HUMAN-LIKE SOLVER
+--------------------------------------------------------------------------------
+
+Simple rules matter enormously for a person: random choices solve 6% of
+puzzles, always moving toward the target solves 73%, and the full rule set with
+vowel-pattern and both-ends rules solves 78%, including 99-100% of 3- and
+4-letter puzzles.
+
+9.1 The simulated person
+
+  - Looks only one step ahead: the words one letter away from the current word.
+  - Picks the best option by their rules, breaking ties at random.
+  - Never reuses a word already in the ladder, and remembers dead ends.
+  - When no option is left, erases the last word and tries again.
+  - Gives up after 60 moves (each word written or erased) or 15 erasures.
+
+9.2 Rules (combined by letters)
+
+  G  Make progress: change a letter to its target letter; otherwise a sideways
+     change; breaking a correct letter last.
+  V  Fix the vowel pattern first.
+  E  Fix the first and last letters first.
+  P  Never change a matching vowel.
+  O  Detour through the first or last letter.
+  L  Detour through common letters.
+  B  Build from both ends at once, each side aiming at the other's latest word.
+
+9.3 Results, 500 puzzles per length, 3 attempts each
+
+  Differences under about 2 points are within noise.
+
+  Rules      Solved            Solved with a shortest   Extra steps when
+             (3 / 4 / 5)       ladder (3 / 4 / 5)       solved (3 / 4 / 5)
+  --------   ---------------   ----------------------   ------------------
+  none        9 /  3 /  5%     0.3 / 0.2 / 0.5%         28  / 25  / 12
+  G          95 / 92 / 32%      57 /  24 /   5%         4.0 / 8.7 / 10.0
+  GE         95 / 90 / 32%      58 /  25 /   5%         3.9 / 8.2 / 10.9
+  GP         96 / 91 / 33%      59 /  26 /   6%         3.7 / 8.1 / 10.1
+  GO         92 / 87 / 32%      56 /  26 /   5%         3.7 / 8.1 / 10.5
+  GL         93 / 87 / 35%      60 /  27 /   5%         4.0 / 7.7 / 11.4
+  GV         98 / 94 / 38%      62 /  28 /   6%         2.8 / 7.0 / 11.4
+  GB         99 / 96 / 34%      59 /  26 /   6%         3.6 / 8.6 / 10.9
+  GVPOLB    100 / 99 / 36%      64 /  26 /   5%         2.0 / 7.2 /  9.9
+
+  - Vowel pattern (V) is the most helpful single addition. It solves more
+    puzzles at every length and cuts wasted steps by about 20-30% for 3- and
+    4-letter puzzles.
+  - Both ends (B) is the biggest boost to finishing. 3-letter puzzles go from
+    95% to 99% solved and 4-letter from 92% to 96%, with fewer moves. It does
+    not make ladders shorter.
+  - Detour rules help only in the full set. O and L alone slightly lower the
+    solve rate for 3- and 4-letter puzzles, but GVPOLB, which includes them,
+    is the best rule set for those lengths.
+  - Protect vowels (P) and ends first (E) are neutral. Making progress already
+    avoids breaking a matching letter, so P adds nothing.
+  - 5-letter puzzles are hard for everyone: about 35% solved within 60 moves.
+    Their shortest ladders average 13 steps, and one-step lookahead may be too
+    weak for them.
+
+The simulated person usually finishes but rarely with a shortest ladder (64% at
+best for 3 letters, 26-28% for 4). The model wanders sideways rather than
+erasing, and it never tidies its ladder at the end the way a person reviewing
+their work would.
+
+
+--------------------------------------------------------------------------------
+10. HOW TO SOLVE A WORD LADDER
+--------------------------------------------------------------------------------
+
+The evidence points to a short routine: read the vowel pattern, build from both
+ends, fix letters when you can, and detour through an outer consonant when you
+can't.
+
+  1. Compare the vowel patterns first. Write each word as consonants and vowels
+     ("cold" is CVCC, "warm" is CVCC). If they match, expect a direct ladder.
+     If two or more positions differ, expect a detour and plan where the vowel
+     will shift.
+  2. Work from both ends. Extend from the start and the end in turn, aiming
+     each side at the other's latest word, until they are one letter apart.
+  3. Fix a letter whenever you can. Change a letter to its final target letter
+     if that makes a real word. Prefer fixes that bring the vowel pattern into
+     line.
+  4. Leave a matching vowel alone. If the start and end share a vowel in the
+     same spot, keep it.
+  5. When stuck, borrow an outer consonant. Swap the first or last letter for
+     a common consonant (b, d, s, t, c, p) to open new words, then swap it to
+     the target letter later.
+  6. Don't lock the first and last letters early. Those are the letters
+     detours need.
+  7. Expect trouble from anagrams and rare letters. Pairs that share letters
+     in different positions take longer, and words with x, j, q or z are often
+     unreachable.
+  8. Tidy up at the end. If two words that aren't neighbors in your ladder
+     differ by one letter, cut out everything between them.
+
+
+--------------------------------------------------------------------------------
+11. LIMITATIONS AND NEXT STEPS
+--------------------------------------------------------------------------------
+
+The 3- and 4-letter results are solid; the 5-letter results and the human model
+are the weakest parts and the best places to extend the work.
+
+  - The 5-letter graph is thin. With common words as in-between steps, 76% of
+    5-letter pairs have no ladder and the rest average 13 steps. Rerunning with
+    the full Scrabble list as in-between words would show whether the 5-letter
+    findings hold when most pairs connect.
+  - Results describe these word lists. A different vocabulary or noun filter
+    would shift the numbers, though the direction of the main effects is
+    consistent across lengths.
+  - Strategy timings are machine-specific. Words expanded is the more reliable
+    comparison; times in microseconds vary with hardware and implementation.
+  - The human model is simple. It has perfect vocabulary by default, one-step
+    lookahead, and never tidies its ladder. Useful extensions: a final tidy-up
+    step, a smaller vocabulary (--vocab 0.7), two-step lookahead, and
+    validation against real people solving the same puzzles.
+  - Sample sizes. The strategy benchmarks used 300 puzzles per length and the
+    human simulation 500 per length with 3 attempts each. Differences of a
+    point or two are within noise.
+
+
+--------------------------------------------------------------------------------
+12. APPENDIX: FILES AND COMMANDS
+--------------------------------------------------------------------------------
+
+  File                       What it does
+  ------------------------   ---------------------------------------------------
+  common_words_3_to_5.csv    5,178 common words (in-between steps)
+  common_nouns_3_to_5.csv    2,382 singular nouns (puzzle words)
+  make_common_words.py       Rebuilds the common-words list
+  word_ladder.cpp            Finds every shortest ladder (random or --all-pairs)
+  analyze_ladders.py         Hypothesis and move analysis tables
+  ladder_strategies.cpp      Computer strategy benchmark (bfs, bnb, astar)
+  human_solver.cpp           Human-like solver simulation
+
+Compile each C++ program with:  g++ -O2 -std=c++17 <file>.cpp -o <name>
+
+  ./word_ladder common_nouns_3_to_5.csv --all-pairs \
+      --dict common_words_3_to_5.csv
+  python3 analyze_ladders.py ladders_all_shortest.csv \
+      common_words_3_to_5.csv --out results
+  ./ladder_strategies common_nouns_3_to_5.csv \
+      --dict common_words_3_to_5.csv --sample 300
+  ./human_solver common_nouns_3_to_5.csv --dict common_words_3_to_5.csv
+
+The all-pairs ladder file is about 270 MB; the analysis takes about two
+minutes.
+
+================================================================================
